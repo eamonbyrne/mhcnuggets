@@ -8,7 +8,7 @@ xshao5@jhu.edu
 
 from mhcnuggets.src.extract_pep_sequences import read_patient_vcf
 from mhcnuggets.src.get_candidate_neoantigens import get_candidate_neoantigens,output_pm,output_mc
-from mhcnuggets.src.predict import predict
+from mhcnuggets.src.predict import predict, PredictionError
 
 import os
 import sys
@@ -116,7 +116,9 @@ def predict_from_vcf(vcf_path,mhcs,class_,output_path,expr_path=None,pep_length_
     if not os.path.exists(MHC_MC_PRED_DIR+'/'+samplename):
         os.mkdir(MHC_MC_PRED_DIR+'/'+samplename)
    
-    hlas=mhcs.split(',')    
+    hlas=mhcs.split(',')
+    failed_alleles = []
+    successful_alleles = []
     for hla in hlas:
         print(hla)
         if class_=='I':
@@ -181,8 +183,17 @@ def predict_from_vcf(vcf_path,mhcs,class_,output_path,expr_path=None,pep_length_
                     hp_ic50s_positions_cII_pickle_path=hp_ic50s_positions_cII_pickle_path,
                     hp_ic50s_hp_lengths_cII_pickle_path=hp_ic50s_hp_lengths_cII_pickle_path,
                     hp_ic50s_first_percentiles_cII_pickle_path=hp_ic50s_first_percentiles_cII_pickle_path)
-        except:
+            successful_alleles.append(hla)
+        except Exception as exc:
+            message = 'Prediction failed for allele %s: %s' % (hla, exc)
+            print(message, file=sys.stderr)
+            failed_alleles.append(message)
             continue
+
+    if failed_alleles and not successful_alleles:
+        raise PredictionError('All requested alleles failed. ' + ' '.join(failed_alleles))
+    if failed_alleles:
+        print('Completed with %d failed allele(s).' % len(failed_alleles), file=sys.stderr)
 
 
 def parse_args():
@@ -282,14 +293,18 @@ def main():
     '''
 
     opts = parse_args()
-    predict_from_vcf(vcf_path=opts['vcf'],pep_length_class=opts['pep_length_class'],
-                     expr_path=opts['expr_path'],model=opts['model'], class_=opts['class'],
-                     model_weights_path=opts['model_weights_path'], pickle_path=opts['pickle_path'],
-                     mhcs=opts['allele'], output_path=opts['output'],mass_spec=opts['mass_spec'],
-                     ic50_threshold=opts['ic50_threshold'],
-                     max_ic50=opts['max_ic50'], embed_peptides= opts['embed_peptides'],
-                     binary_preds=opts['binary_predictions'],ba_models=opts['ba_models'],
-                     rank_output=opts['rank_output'],ensembl=opts['genome'])
+    try:
+        predict_from_vcf(vcf_path=opts['vcf'],pep_length_class=opts['pep_length_class'],
+                         expr_path=opts['expr_path'],model=opts['model'], class_=opts['class'],
+                         model_weights_path=opts['model_weights_path'], pickle_path=opts['pickle_path'],
+                         mhcs=opts['allele'], output_path=opts['output'],mass_spec=opts['mass_spec'],
+                         ic50_threshold=opts['ic50_threshold'],
+                         max_ic50=opts['max_ic50'], embed_peptides= opts['embed_peptides'],
+                         binary_preds=opts['binary_predictions'],ba_models=opts['ba_models'],
+                         rank_output=opts['rank_output'],ensembl=opts['genome'])
+    except PredictionError as exc:
+        print("Prediction failed: %s" % exc, file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

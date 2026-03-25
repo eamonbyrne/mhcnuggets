@@ -9,6 +9,7 @@ rohit.bhattachar@gmail.com
 
 from mhcnuggets.src.dataset import Dataset
 from mhcnuggets.src.supertypes import supertype_mhcI_allele, supertype_mhcI_group, supertype_hla_C_allele, supertype_hla_C_allele_clade
+from mhcnuggets.src.allele_utils import normalize_allele_name, resolve_allele
 
 import argparse
 
@@ -99,8 +100,7 @@ def closest_human_allele_name(mhc, examples_per_allele):
         _sub_type = int(mhc[8:10])
 
     except ValueError as e:
-        print("Invalid human allele")
-        return
+        return ""
 
     _n_training = 0
     alleles = sorted(examples_per_allele)
@@ -157,15 +157,20 @@ def closest_allele(mhc,pickle_path):
     Find the closest allele to a
     given MHC
     """
-    mhc = mhc_allele_group_protein_naming(mhc)
-    examples_per_allele = pickle.load(open(os.path.join(MHCNUGGETS_HOME,pickle_path), 'rb'))
-
+    with open(os.path.join(MHCNUGGETS_HOME, pickle_path), 'rb') as pickle_file:
+        examples_per_allele = pickle.load(pickle_file)
     alleles = sorted(examples_per_allele)
 
-    # search for exact match
-    match = exact_match(mhc, alleles)
-    if match:
+    mhc = normalize_allele_name(mhc)
+    match = resolve_allele(mhc, alleles)
+    if match in examples_per_allele:
         return match
+
+    if not mhc.startswith('HLA-'):
+        raise ValueError("Unsupported Class I allele '%s'. Expected a human HLA allele such as 'HLA-A02:01' or 'A*02:01'." %
+                         mhc)
+
+    mhc = mhc_allele_group_protein_naming(mhc)
 
     # search for biological supertype allele match
     closest_mhc = closest_human_allele_supertype(mhc, examples_per_allele)

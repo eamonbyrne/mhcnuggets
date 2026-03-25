@@ -92,9 +92,9 @@ def train(class_, data, mhc, save_path, n_epoch, model='lstm',
 
     #select appropriate loss function for binding affinity data (continuous) or mass spec data (binary)    
     if mass_spec:
-        model.compile(loss='binary_crossentropy', optimizer=Adam(lr=0.001))
+        model.compile(loss='binary_crossentropy', optimizer=Adam(learning_rate=0.001))
     else:
-        model.compile(loss='mse', optimizer=Adam(lr=0.001))
+        model.compile(loss='mse', optimizer=Adam(learning_rate=0.001))
 
     # convergence criterion
 #    highest_f1 = -1

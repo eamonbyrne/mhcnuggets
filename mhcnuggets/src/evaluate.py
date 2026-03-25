@@ -63,9 +63,9 @@ def test(class_, data, mhc, model_path, model='lstm', mass_spec=False, ic50_thre
     # compile model
     model.load_weights(model_path)
     if mass_spec:
-        model.compile(loss='binary_crossentropy', optimizer=Adam(lr=0.001))
+        model.compile(loss='binary_crossentropy', optimizer=Adam(learning_rate=0.001))
     else:
-        model.compile(loss='mse', optimizer=Adam(lr=0.001))
+        model.compile(loss='mse', optimizer=Adam(learning_rate=0.001))
 
     # get tensorized values for testing
     test_peptides, test_continuous, test_binary = mhc_test.tensorize_keras(embed_type='softhot')
@@ -128,9 +128,9 @@ def test_by_length(class_, data, mhc, model_path, model='lstm', mass_spec=False,
     # compile model
     model.load_weights(model_path)
     if mass_spec:
-        model.compile(loss='binary_crossentropy', optimizer=Adam(lr=0.001))
+        model.compile(loss='binary_crossentropy', optimizer=Adam(learning_rate=0.001))
     else:
-        model.compile(loss='mse', optimizer=Adam(lr=0.001))
+        model.compile(loss='mse', optimizer=Adam(learning_rate=0.001))
 
     mhc_test.mask_peptides(max_len=mask_len)
   

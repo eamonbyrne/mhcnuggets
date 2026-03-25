@@ -15,21 +15,21 @@ except:
 from mhcnuggets.src.models import get_predictions, mhcnuggets_lstm
 from mhcnuggets.src.dataset import mask_peptides
 from mhcnuggets.src.dataset import tensorize_keras, map_proba_to_ic50
+from mhcnuggets.src.predict_utils import PredictionError, get_class_settings
+from mhcnuggets.src.predict_utils import load_peptides, validate_output_path
+from mhcnuggets.src.predict_utils import load_pickle, resolve_predictor_mhc
+from mhcnuggets.src.predict_utils import resolve_model_weights_path
 
 try:
     from keras.optimizers import Adam
 except:
     from tensorflow.keras.optimizers import Adam
 import argparse
-from mhcnuggets.src.find_closest_mhcI import closest_allele as closest_mhcI
-from mhcnuggets.src.find_closest_mhcII import closest_allele as closest_mhcII
 
 import os
 import sys
 import math
 MHCNUGGETS_HOME = os.path.join(os.path.dirname(__file__), '..')
-from mhcnuggets.src.aa_embeddings import NUM_AAS
-from mhcnuggets.src.aa_embeddings import MHCI_MASK_LEN, MHCII_MASK_LEN
 
 
 def predict(class_, peptides_path, mhc, pickle_path='data/production/examples_per_allele.pkl',
@@ -47,45 +47,43 @@ def predict(class_, peptides_path, mhc, pickle_path='data/production/examples_pe
     '''
     Prediction protocol
     '''
-    # read peptides
-    peptides = [p.strip() for p in open(peptides_path)]
+    class_upper, mask_len, input_size = get_class_settings(class_)
+    peptides = load_peptides(peptides_path)
+    validate_output_path(output, 'Output')
 
-    # set the length
-    if class_.upper() == 'I':
-        mask_len = MHCI_MASK_LEN
-        input_size=(MHCI_MASK_LEN, NUM_AAS)
-    elif class_.upper() == 'II':
-        mask_len = MHCII_MASK_LEN
-        input_size=(MHCII_MASK_LEN, NUM_AAS)
+    if rank_output and output:
+        validate_output_path(output, 'Rank output')
 
     print('Predicting for %d peptides' % (len(peptides)))
 
     # apply cut/pad or mask to same length
     normed_peptides, original_peptides = mask_peptides(peptides, max_len=mask_len)
+    if not normed_peptides:
+        raise PredictionError("No valid peptides remained after length filtering. Class %s supports peptides up to %d residues." %
+                              (class_upper, mask_len))
+
     # get tensorized values for prediction
     peptides_tensor = tensorize_keras(normed_peptides, embed_type='softhot')
 
     # make model
     print('Building model')
     model = mhcnuggets_lstm(input_size)
-    if class_.upper() == 'I':
-        predictor_mhc = closest_mhcI(mhc,pickle_path)
-    elif class_.upper() == 'II':
-        predictor_mhc = closest_mhcII(mhc,pickle_path)
+    predictor_mhc = resolve_predictor_mhc(class_upper, mhc, pickle_path)
     print("Closest allele found", predictor_mhc)
 
+    weights_path = resolve_model_weights_path(model_weights_path, predictor_mhc, ba_models)
     if model_weights_path != "saves/production/":
         print('Predicting with user-specified model: ' + model_weights_path)
-        model.load_weights(model_weights_path)
     elif ba_models:
         print('Predicting with only binding affinity trained models')
-        model.load_weights(os.path.join(MHCNUGGETS_HOME,model_weights_path,predictor_mhc+'_BA.h5'))
-    elif os.path.isfile(os.path.join(MHCNUGGETS_HOME,model_weights_path,predictor_mhc+'_BA_to_HLAp.h5')):
+    elif weights_path.endswith('_BA_to_HLAp.h5'):
         print('BA_to_HLAp model found, predicting with BA_to_HLAp model...')
-        model.load_weights(os.path.join(MHCNUGGETS_HOME,model_weights_path,predictor_mhc+'_BA_to_HLAp.h5'))
     else:
-        print ('No BA_to_HLAp model found, predicting with BA model...')
-        model.load_weights(os.path.join(MHCNUGGETS_HOME,model_weights_path,predictor_mhc+'_BA.h5'))
+        print('No BA_to_HLAp model found, predicting with BA model...')
+    try:
+        model.load_weights(weights_path)
+    except Exception as exc:
+        raise PredictionError("Failed to load model weights from %s: %s" % (weights_path, exc))
 
     if mass_spec:
         model.compile(loss='binary_crossentropy', optimizer=Adam(learning_rate=0.001))
@@ -96,26 +94,25 @@ def predict(class_, peptides_path, mhc, pickle_path='data/production/examples_pe
     preds_continuous, preds_binary = get_predictions(peptides_tensor, model, binary_preds, embed_peptides, ic50_threshold, max_ic50)
     ic50s = [map_proba_to_ic50(p[0], max_ic50) for p in preds_continuous]
 
+    rank_filehandle = None
     if (rank_output):
         print("Rank output selected, computing peptide IC50 ranks against human proteome peptides...")
-        if class_.upper() == 'I':
-            hp_ic50_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME,
-                                                           hp_ic50s_cI_pickle_path), 'rb'))
-            ic50_pos_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME
-                                                            , hp_ic50s_positions_cI_pickle_path), 'rb'))
-            hp_lengths_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME
-                                                              , hp_ic50s_hp_lengths_cI_pickle_path), 'rb'))
-            first_percentiles_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME
-                                                                     , hp_ic50s_first_percentiles_cI_pickle_path), 'rb'))
-        elif class_.upper() == 'II':
-            hp_ic50_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME,
-                                                           hp_ic50s_cII_pickle_path), 'rb'))
-            ic50_pos_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME,
-                                                            hp_ic50s_positions_cII_pickle_path), 'rb'))
-            hp_lengths_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME
-                                                              , hp_ic50s_hp_lengths_cII_pickle_path), 'rb'))
-            first_percentiles_pickle = pickle.load(open(os.path.join(MHCNUGGETS_HOME
-                                                                     , hp_ic50s_first_percentiles_cII_pickle_path), 'rb'))
+        if class_upper == 'I':
+            hp_ic50_pickle = load_pickle(hp_ic50s_cI_pickle_path, 'Class I rank IC50')
+            ic50_pos_pickle = load_pickle(hp_ic50s_positions_cI_pickle_path, 'Class I rank position')
+            hp_lengths_pickle = load_pickle(hp_ic50s_hp_lengths_cI_pickle_path, 'Class I rank peptide length')
+            first_percentiles_pickle = load_pickle(hp_ic50s_first_percentiles_cI_pickle_path,
+                                                   'Class I rank percentile')
+        else:
+            hp_ic50_pickle = load_pickle(hp_ic50s_cII_pickle_path, 'Class II rank IC50')
+            ic50_pos_pickle = load_pickle(hp_ic50s_positions_cII_pickle_path, 'Class II rank position')
+            hp_lengths_pickle = load_pickle(hp_ic50s_hp_lengths_cII_pickle_path, 'Class II rank peptide length')
+            first_percentiles_pickle = load_pickle(hp_ic50s_first_percentiles_cII_pickle_path,
+                                                   'Class II rank percentile')
+
+        if predictor_mhc not in first_percentiles_pickle:
+            raise PredictionError("Rank output is unavailable for allele '%s' in the selected rank data." %
+                                  predictor_mhc)
         ic50_ranks = get_ranks(ic50s,hp_ic50_pickle,hp_lengths_pickle,
                                first_percentiles_pickle,ic50_pos_pickle,predictor_mhc)
         if (output):
@@ -148,6 +145,8 @@ def predict(class_, peptides_path, mhc, pickle_path='data/production/examples_pe
     finally:
         if output:
             filehandle.close()
+        if rank_filehandle and rank_filehandle is not sys.stdout:
+            rank_filehandle.close()
 
 
 
@@ -285,14 +284,18 @@ def main():
     '''
 
     opts = parse_args()
-    predict(model=opts['model'], class_=opts['class'],
-            peptides_path=opts['peptides'],
-            model_weights_path=opts['model_weights_path'], pickle_path=opts['pickle_path'],
-            mhc=opts['allele'], output=opts['output'],mass_spec=opts['mass_spec'],
-            ic50_threshold=opts['ic50_threshold'],
-            max_ic50=opts['max_ic50'], embed_peptides= opts['embed_peptides'],
-            binary_preds=opts['binary_predictions'],ba_models=opts['ba_models'],
-            rank_output=opts['rank_output'])
+    try:
+        predict(model=opts['model'], class_=opts['class'],
+                peptides_path=opts['peptides'],
+                model_weights_path=opts['model_weights_path'], pickle_path=opts['pickle_path'],
+                mhc=opts['allele'], output=opts['output'],mass_spec=opts['mass_spec'],
+                ic50_threshold=opts['ic50_threshold'],
+                max_ic50=opts['max_ic50'], embed_peptides= opts['embed_peptides'],
+                binary_preds=opts['binary_predictions'],ba_models=opts['ba_models'],
+                rank_output=opts['rank_output'])
+    except PredictionError as exc:
+        print("Prediction failed: %s" % exc, file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

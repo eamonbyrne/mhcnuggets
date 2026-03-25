@@ -9,6 +9,7 @@ rohit.bhattachar@gmail.com
 
 from mhcnuggets.src.dataset import Dataset
 from mhcnuggets.src.supertypes import supertype_mhcII_allele, supertype_mhcII_allele_clade
+from mhcnuggets.src.allele_utils import normalize_allele_name, resolve_allele
 import argparse
 
 try:
@@ -150,8 +151,7 @@ def closest_human_allele_name(mhc, examples_per_allele):
         _super_type = mhc[8:10]
         _sub_type = mhc[11:13]
     except ValueError as e:
-        print("Invalid human allele")
-        return
+        return ""
     _n_training = 0
     alleles = sorted(examples_per_allele)
 
@@ -192,8 +192,7 @@ def closest_mouse_allele(mhc, examples_per_allele):
     try:
         _gene = mhc[4:6]
     except ValueError as e:
-        print("Invalid mouse allele")
-        return
+        return ""
 
     for allele in examples_per_allele:
         gene = allele[4:6]
@@ -227,14 +226,16 @@ def closest_allele(mhc,pickle_path):
     Find the closest allele to a
     given MHC
     """
-    mhc = mhc_allele_group_protein_naming(mhc)
-    examples_per_allele = pickle.load(open(os.path.join(MHCNUGGETS_HOME,pickle_path), 'rb'))
-
+    with open(os.path.join(MHCNUGGETS_HOME, pickle_path), 'rb') as pickle_file:
+        examples_per_allele = pickle.load(pickle_file)
     alleles = sorted(examples_per_allele)
-    # search for exact match
-    match = exact_match(mhc, alleles)
-    if match:
+
+    mhc = normalize_allele_name(mhc)
+    match = resolve_allele(mhc, alleles)
+    if match in examples_per_allele:
         return match
+
+    mhc = mhc_allele_group_protein_naming(mhc)
 
     closest_mhc = ""
 
@@ -253,8 +254,8 @@ def closest_allele(mhc,pickle_path):
     elif mhc[0:3] == 'H-2':
         closest_mhc = closest_mouse_allele(mhc, examples_per_allele)
     else:
-        print("Invalid human or mouse allele")
-        return
+        raise ValueError("Unsupported Class II allele '%s'. Expected a human HLA allele such as 'DRB1*01:01' or a mouse allele such as 'H-2-IAb'." %
+                         mhc)
 
     return closest_mhc
 

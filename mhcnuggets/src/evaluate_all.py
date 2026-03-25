@@ -72,9 +72,9 @@ def test_all(class_, data, model_path_dir, model='lstm', mass_spec=False, ic50_t
         model.load_weights(model_path_dir + '/' + mhc + '.h5')
 
         if mass_spec:
-            model.compile(loss='binary_crossentropy', optimizer=Adam(lr=0.001))
+            model.compile(loss='binary_crossentropy', optimizer=Adam(learning_rate=0.001))
         else:
-            model.compile(loss='mse', optimizer=Adam(lr=0.001))
+            model.compile(loss='mse', optimizer=Adam(learning_rate=0.001))
 
 
         # get tensorized values for training
